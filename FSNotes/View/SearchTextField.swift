@@ -11,21 +11,31 @@ import Carbon.HIToolbox
 
 import FSNotesCore_macOS
 
-class SearchTextField: NSTextField, NSTextFieldDelegate {
+class SearchTextField: NSSearchField, NSSearchFieldDelegate {
 
     public var vcDelegate: ViewController!
     
     private var filterQueue = OperationQueue.init()
-    private var searchTimer = Timer()
-    
+
     public var searchQuery = ""
     public var selectedRange = NSRange()
     public var skipAutocomplete = false
-        
-    override func controlTextDidEndEditing(_ obj: Notification) {
-        focusRingType = .none
+
+    public var timestamp: Int64?
+    private var lastQueryLength: Int = 0
+    private var lastQuery = String()
+
+    override func textDidEndEditing(_ notification: Notification) {
+        if let editor = self.currentEditor(), editor.selectedRange.length > 0 {
+            editor.replaceCharacters(in: editor.selectedRange, with: "")
+            window?.makeFirstResponder(nil)
+        }
+
+        self.skipAutocomplete = false
+        self.lastQuery = String()
+        self.lastQueryLength = 0
     }
-    
+
     override func keyUp(with event: NSEvent) {
         if (event.keyCode == kVK_DownArrow) {
             vcDelegate.focusTable()
@@ -34,96 +44,204 @@ class SearchTextField: NSTextField, NSTextFieldDelegate {
         }
         
         if (event.keyCode == kVK_LeftArrow && stringValue.count == 0) {
-            vcDelegate.storageOutlineView.window?.makeFirstResponder(vcDelegate.storageOutlineView)
-            vcDelegate.storageOutlineView.selectRowIndexes([1], byExtendingSelection: false)
+            vcDelegate.sidebarOutlineView.window?.makeFirstResponder(vcDelegate.sidebarOutlineView)
+            vcDelegate.sidebarOutlineView.selectRowIndexes([1], byExtendingSelection: false)
             return
         }
-        
-        if event.keyCode == kVK_Return {
-            vcDelegate.focusEditArea()
-        }
 
-        if self.skipAutocomplete {
-           self.skipAutocomplete = false
+        if event.keyCode == kVK_Delete || event.keyCode == kVK_ForwardDelete {
+            self.skipAutocomplete = true
+            return
         }
     }
- 
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if (
-            event.keyCode == kVK_Escape
-            || (
-                [kVK_ANSI_L, kVK_ANSI_N].contains(Int(event.keyCode))
-                && event.modifierFlags.contains(.command)
-            )
-        ) {
-            searchQuery = ""
-            return true
-        }
-        
-        return super.performKeyEquivalent(with: event)
-    }
-    
+
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
         switch commandSelector.description {
+        case "moveDown:":
+            if let editor = currentEditor() {
+                let query = editor.string.prefix(editor.selectedRange.location)
+                if query.count == 0 {
+                    return false
+                }
+                self.stringValue = String(query)
+            }
+            return true
         case "cancelOperation:":
+            self.skipAutocomplete = true
+            self.lastQuery = String()
+            self.filterQueue.cancelAllOperations()
             return true
         case "deleteBackward:":
             self.skipAutocomplete = true
+            self.lastQuery = String()
+            self.filterQueue.cancelAllOperations()
             textView.deleteBackward(self)
             return true
         case "insertNewline:", "insertNewlineIgnoringFieldEditor:":
-            if let note = vcDelegate.editArea.getSelectedNote(), stringValue.count > 0, note.title.lowercased().starts(with: searchQuery.lowercased()) {
-                vcDelegate.focusEditArea()
+            if let note = vcDelegate.editArea.getSelectedNote(), stringValue.utf16.count > 0, note.title.lowercased() == stringValue.lowercased() || note.fileName.lowercased() == stringValue.lowercased() {
+
+                if note.title.lowercased() == stringValue.lowercased() && note.title != stringValue {
+                    stringValue = note.title
+                }
+
+                if note.fileName.lowercased() == stringValue.lowercased() && note.fileName != stringValue {
+                    stringValue = note.fileName
+                }
+
+                markCompleteonAsSuccess()
+
+                if vcDelegate.currentPreviewState == .on
+                    && EditTextView.note?.container != .encryptedTextPack {
+                    vcDelegate.currentPreviewState = .off
+                    DispatchQueue.main.async {
+                        self.vcDelegate.refillEditArea()
+                        NSApp.mainWindow?.makeFirstResponder(self.vcDelegate.editArea)
+                    }
+                } else {
+                    DispatchQueue.main.async {
+                        self.vcDelegate.focusEditArea()
+                    }
+                }
             } else {
                 vcDelegate.makeNote(self)
             }
+
             return true
         case "insertTab:":
-            vcDelegate.focusEditArea()
+            markCompleteonAsSuccess()
+
+            if vcDelegate.currentPreviewState == .on {
+                NSApp.mainWindow?.makeFirstResponder(vcDelegate.editArea.markdownView)
+            } else {
+                vcDelegate.focusEditArea()
+            }
+
             vcDelegate.editArea.scrollToCursor()
             return true
         case "deleteWordBackward:":
+            self.skipAutocomplete = true
+            self.lastQuery = String()
+            self.filterQueue.cancelAllOperations()
             textView.deleteWordBackward(self)
+            lastQueryLength = self.stringValue.utf16.count
             return true
+        case "noop:":
+            if let event = NSApp.currentEvent, event.modifierFlags.contains(.command) && event.keyCode == kVK_Return {
+                vcDelegate.makeNote(self)
+                return true
+            }
+            return false
         default:
             return false
         }
     }
-    
-    override func controlTextDidChange(_ obj: Notification) {
-        UserDataService.instance.searchTrigger = true
+
+    func controlTextDidChange(_ obj: Notification) {
+        vcDelegate.restoreCurrentPreviewState()
         
-        filterQueue.cancelAllOperations()
-        filterQueue.addOperation {
-            DispatchQueue.main.async {
-                self.vcDelegate.updateTable(search: true) {
-                    if UserDefaultsManagement.focusInEditorOnNoteSelect {
-                        self.searchTimer.invalidate()
-                        self.searchTimer = Timer.scheduledTimer(timeInterval: TimeInterval(1), target: self, selector: #selector(self.onEndSearch), userInfo: nil, repeats: false)
-                    } else {
-                        UserDataService.instance.searchTrigger = false
+        search()
+    }
+    
+    public func suggestAutocomplete(_ note: Note, filter: String) {
+        guard note.title.lowercased() != filter.lowercased(),
+            let editor = currentEditor()
+        else { return }
+
+        if note.title.lowercased().starts(with: filter.lowercased()) {
+
+            if note.title.lowercased() != stringValue.lowercased() {
+                stringValue = filter + String(note.title.utf16.suffix(note.title.utf16.count - filter.utf16.count))!
+                lastQuery = stringValue
+                lastQueryLength = stringValue.utf16.count
+            }
+
+            editor.selectedRange = NSRange(filter.utf16.count..<note.title.utf16.count)
+            return
+        }
+
+        if note.fileName.lowercased().starts(with: filter.lowercased()) {
+
+            if note.fileName.lowercased() != stringValue.lowercased() {
+                stringValue = filter + String(note.fileName.utf16.suffix(note.fileName.utf16.count - filter.utf16.count))!
+                lastQuery = stringValue
+                lastQueryLength = stringValue.utf16.count
+            }
+
+            editor.selectedRange = NSRange(filter.utf16.count..<note.fileName.utf16.count)
+            return
+        }
+
+        lastQuery = stringValue
+    }
+
+    @objc private func search() {
+        UserDataService.instance.searchTrigger = true
+
+        let searchText = self.stringValue
+        let currentTextLength = searchText.count
+        var sidebarItem: SidebarItem? = nil
+
+        if let location = currentEditor()?.selectedRange.location, !skipAutocomplete {
+            if lastQuery.startsWith(string: stringValue) {
+                let range = NSRange(location: location, length: lastQuery.utf16.count - location)
+                stringValue = lastQuery
+                currentEditor()?.selectedRange = range
+                return
+            }
+        }
+
+        if currentTextLength > self.lastQueryLength {
+            self.skipAutocomplete = false
+        }
+
+        self.lastQueryLength = searchText.count
+
+        let projects = vcDelegate.sidebarOutlineView.getSidebarProjects()
+        let tags = vcDelegate.sidebarOutlineView.getSidebarTags()
+
+        if projects == nil && tags == nil {
+            sidebarItem = self.vcDelegate.getSidebarItem()
+        }
+
+        self.filterQueue.cancelAllOperations()
+        self.filterQueue.addOperation {
+            self.vcDelegate.updateTable(search: true, searchText: searchText, sidebarItem: sidebarItem, projects: projects, tags: tags) {
+                if !UserDefaultsManagement.focusInEditorOnNoteSelect {
+                    UserDataService.instance.searchTrigger = false
+                }
+
+                if !self.skipAutocomplete {
+                    if let note = self.vcDelegate.notesTableView.noteList.first {
+                        DispatchQueue.main.async {
+                            if let searchQuery = self.getSearchTextExceptCompletion() {
+                                self.suggestAutocomplete(note, filter: searchQuery)
+                            }
+                        }
                     }
                 }
             }
         }
+
+        let pb = NSPasteboard(name: .findPboard)
+        pb.declareTypes([.textFinderOptions, .string], owner: nil)
+        pb.setString(searchText, forType: NSPasteboard.PasteboardType.string)
     }
-    
-    @objc func onEndSearch() {
-        UserDataService.instance.searchTrigger = false
-    }
-    
-    public func suggestAutocomplete(_ note: Note) {
-        if note.title == self.stringValue {
-            return
+
+    private func getSearchTextExceptCompletion() -> String? {
+        guard let editor = currentEditor() else { return nil }
+
+        if editor.selectedRange.location > 0 {
+            return String(editor.string.suffix(editor.selectedRange.location))
         }
-        
-        let searchQuery = self.stringValue
-        
-        if note.title.lowercased().starts(with: searchQuery.lowercased()) {
-            let text = searchQuery + note.title.suffix(note.title.count - searchQuery.count)
-            stringValue = text
-            currentEditor()?.selectedRange = NSRange(searchQuery.utf16.count..<note.title.utf16.count)
-        }
+
+        return nil
     }
-    
+
+    private func markCompleteonAsSuccess() {
+        currentEditor()?.selectedRange = NSRange(location: stringValue.count, length: 0)
+
+        self.skipAutocomplete = false
+        self.lastQuery = String()
+        self.lastQueryLength = 0
+    }
 }

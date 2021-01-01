@@ -2,12 +2,35 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSHumanReadableCopyright</key>
+	<string></string>
+	<key>UIFileSharingEnabled</key>
+	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
 	<string>FSNotes</string>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeIconFiles</key>
+			<array>
+				<string>TextBundle.icns</string>
+			</array>
+			<key>CFBundleTypeName</key>
+			<string>TextBundle</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>textbundle</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleGetInfoString</key>
+	<string></string>
 	<key>CFBundleIcons</key>
 	<dict/>
 	<key>CFBundleIcons~ipad</key>
@@ -21,12 +44,53 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>2.0.1</string>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>CFBundleURLIconFile</key>
+			<string>makeNote</string>
+			<key>CFBundleURLName</key>
+			<string>co.fluder.mobile.FSNotes-iOS</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>fsnotes</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>CFBundleURLIconFile</key>
+			<string>makeNote</string>
+			<key>CFBundleURLName</key>
+			<string>co.fluder.mobile.FSNotes-iOS</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>nv</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>CFBundleURLIconFile</key>
+			<string>makeNote</string>
+			<key>CFBundleURLName</key>
+			<string>co.fluder.mobile.FSNotes-iOS</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>nvalt</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleVersion</key>
-	<string>65</string>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.productivity</string>
 	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
@@ -35,8 +99,12 @@
 	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>Needs for attach photo in notes</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Note encryption and decryption with FaceID</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Night Mode needs coordinate for calculate sunset/sunrise time</string>
+	<string>Requested when photo attached</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Needs permission to write images in photos app</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Needs for attach images in notes</string>
 	<key>NSUbiquitousContainers</key>
@@ -49,6 +117,10 @@
 			<string>One</string>
 		</dict>
 	</dict>
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>es.fsnot.handoff-open-note</string>
+	</array>
 	<key>UIAppFonts</key>
 	<array>
 		<string>SourceCodePro-Bold.ttf</string>
@@ -88,11 +160,21 @@
 			<array>
 				<string>com.apple.package</string>
 			</array>
+			<key>UTTypeDescription</key>
+			<string>TextBundle</string>
+			<key>UTTypeIconFiles</key>
+			<array>
+				<string>TextBundle</string>
+			</array>
 			<key>UTTypeIdentifier</key>
-			<string></string>
+			<string>org.textbundle.package</string>
 			<key>UTTypeTagSpecification</key>
-			<dict/>
+			<dict>
+				<key>public.filename-extension</key>
+				<string>textbundle</string>
+			</dict>
 		</dict>
+		<dict/>
 	</array>
 </dict>
 </plist>

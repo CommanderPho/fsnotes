@@ -20,7 +20,7 @@ extension NSFont {
     var height:CGFloat {
         let constraintRect = CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         
-        let boundingBox = "A".boundingRect(with: constraintRect, options: NSString.DrawingOptions.usesLineFragmentOrigin, attributes: [NSAttributedStringKey.font: self], context: nil)
+        let boundingBox = "A".boundingRect(with: constraintRect, options: NSString.DrawingOptions.usesLineFragmentOrigin, attributes: [NSAttributedString.Key.font: self], context: nil)
         
         return boundingBox.height
     }
@@ -31,6 +31,14 @@ extension NSFont {
     
     static func boldFont() -> NSFont {
         return NSFontManager().convert(UserDefaultsManagement.noteFont, toHaveTrait: .boldFontMask)
+    }
+
+    static func addItalic(font: Font) -> NSFont {
+        return NSFontManager().convert(font, toHaveTrait: .italicFontMask)
+    }
+
+    static func addBold(font: Font) -> NSFont {
+        return NSFontManager().convert(font, toHaveTrait: .boldFontMask)
     }
     
     func bold() -> NSFont {

@@ -16,6 +16,7 @@ import Foundation
     typealias Color = NSColor
 #else
     import UIKit
+    import NightNight
     typealias Font = UIFont
     typealias TextView = EditTextView
     typealias Color = UIColor
@@ -82,13 +83,47 @@ public class TextFormatter {
     
     func bold() {
         if note.isMarkdown() {
-            let string = "**" + attributedString.string + "**"
-            let location = string.count == 4 ? range.location + 2 : range.upperBound + 4
-            self.insertText(string, selectRange: NSMakeRange(location, 0))
+
+            // UnBold if not selected
+            if range.length == 0 {
+                var resultFound = false
+                let string = getAttributedString().string
+
+                NotesTextProcessor.boldRegex.matches(string, range: NSRange(0..<string.count)) { (result) -> Void in
+                    guard let range = result?.range else { return }
+
+                    if range.intersection(self.range) != nil {
+                        let boldAttributed = self.getAttributedString().attributedSubstring(from: range)
+
+                        self.unBold(attributedString: boldAttributed, range: range)
+                        resultFound = true
+                    }
+                }
+
+                if resultFound {
+                    return
+                }
+            }
+
+            // UnBold selected
+            if attributedString.string.contains("**") || attributedString.string.contains("__") {
+                unBold(attributedString: attributedString, range: range)
+                return
+            }
+
+            var selectRange = NSMakeRange(range.location + 2, 0)
+            let string = attributedString.string
+            let length = string.count
+
+            if length != 0 {
+                selectRange = NSMakeRange(range.location, length + 4)
+            }
+
+            insertText("**" + string + "**", selectRange: selectRange)
         }
         
         if type == .RichText {
-            let newFont = toggleBoldFont(font: self.getTypingAttributes())
+            let newFont = toggleBoldFont(font: getTypingAttributes())
             
             #if os(iOS)
             guard self.attributedString.length > 0 else {
@@ -98,7 +133,7 @@ public class TextFormatter {
             #endif
             
             textView.undoManager?.beginUndoGrouping()
-            
+
             #if os(OSX)
                 let string = NSMutableAttributedString(attributedString: attributedString)
                 string.addAttribute(.font, value: newFont, range: selectedRange)
@@ -116,16 +151,50 @@ public class TextFormatter {
                 textView.textStorage.replaceCharacters(in: selectedRange, with: mutableAttributedString)
                 textView.selectedRange = selectedRange
             #endif
-            
+
             textView.undoManager?.endUndoGrouping()
         }
     }
     
     func italic() {
         if note.isMarkdown() {
-            let string = "_" + attributedString.string + "_"
-            let location = string.count == 2 ? range.location + 1 : range.upperBound + 2
-            self.insertText(string, selectRange: NSMakeRange(location, 0))
+
+            // UnItalic if not selected
+            if range.length == 0 {
+                var resultFound = false
+                let string = getAttributedString().string
+
+                NotesTextProcessor.italicRegex.matches(string, range: NSRange(0..<string.count)) { (result) -> Void in
+                    guard let range = result?.range else { return }
+
+                    if range.intersection(self.range) != nil {
+                        let italicAttributed = self.getAttributedString().attributedSubstring(from: range)
+
+                        self.unItalic(attributedString: italicAttributed, range: range)
+                        resultFound = true
+                    }
+                }
+
+                if resultFound {
+                    return
+                }
+            }
+
+            // UnItalic
+            if attributedString.string.contains("*") || attributedString.string.contains("_") {
+                unItalic(attributedString: attributedString, range: range)
+                return
+            }
+
+            var selectRange = NSMakeRange(range.location + 1, 0)
+            let string = attributedString.string
+            let length = string.count
+
+            if length != 0 {
+                selectRange = NSMakeRange(range.location, length + 2)
+            }
+
+            insertText("_" + string + "_", selectRange: selectRange)
         }
         
         if type == .RichText {
@@ -159,6 +228,35 @@ public class TextFormatter {
             textView.undoManager?.endUndoGrouping()
         }
     }
+
+    private func unBold(attributedString: NSAttributedString, range: NSRange) {
+        let unBold = attributedString
+            .string
+            .replacingOccurrences(of: "**", with: "")
+            .replacingOccurrences(of: "__", with: "")
+
+        let selectRange = NSRange(location: range.location, length: unBold.count)
+        insertText(unBold, replacementRange: range, selectRange: selectRange)
+    }
+
+    private func unItalic(attributedString: NSAttributedString, range: NSRange) {
+        let unItalic = attributedString
+            .string
+            .replacingOccurrences(of: "*", with: "")
+            .replacingOccurrences(of: "_", with: "")
+
+        let selectRange = NSRange(location: range.location, length: unItalic.count)
+        insertText(unItalic, replacementRange: range, selectRange: selectRange)
+    }
+
+    private func unStrike(attributedString: NSAttributedString, range: NSRange) {
+        let unStrike = attributedString
+            .string
+            .replacingOccurrences(of: "~~", with: "")
+
+        let selectRange = NSRange(location: range.location, length: unStrike.count)
+        insertText(unStrike, replacementRange: range, selectRange: selectRange)
+    }
     
     public func underline() {
         if note.type == .RichText {
@@ -174,10 +272,12 @@ public class TextFormatter {
                     if underline == 1 {
                         attributedString.removeAttribute(.underlineStyle, range: range)
                     } else {
-                        attributedString.addAttribute(.underlineStyle, value: NSUnderlineStyle.styleSingle.rawValue, range: range)
+                        attributedString.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: range)
+                        attributedString.addAttribute(.underlineColor, value: NotesTextProcessor.underlineColor, range: range)
                     }
                 } else {
-                    attributedString.addAttribute(.underlineStyle, value: NSUnderlineStyle.styleSingle.rawValue, range: range)
+                    attributedString.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: range)
+                    attributedString.addAttribute(.underlineColor, value: NotesTextProcessor.underlineColor, range: range)
                 }
 
                 #if os(iOS)
@@ -185,24 +285,33 @@ public class TextFormatter {
                     self.textView.selectedRange = selectedRange
                 #endif
 
+                self.textView.undoManager?.beginUndoGrouping()
                 self.storage.replaceCharacters(in: selectedRange, with: attributedString)
+                self.textView.undoManager?.endUndoGrouping()
+
+                self.textView.selectedRange = selectedRange
                 return
             }
             
             #if os(OSX)
                 if (textView.typingAttributes[.underlineStyle] == nil) {
-                    attributedString.addAttribute(NSAttributedStringKey.underlineStyle, value: NSUnderlineStyle.styleSingle.rawValue, range: selectedRange)
+                    attributedString.addAttribute(NSAttributedString.Key.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: selectedRange)
+
+
+                    attributedString.addAttribute(.underlineColor, value: NotesTextProcessor.underlineColor, range: selectedRange)
+
+                    
                     textView.typingAttributes[.underlineStyle] = 1
                 } else {
-                    textView.typingAttributes.removeValue(forKey: NSAttributedStringKey(rawValue: "NSUnderline"))
+                    textView.typingAttributes.removeValue(forKey: NSAttributedString.Key(rawValue: "NSUnderline"))
                 }
 
                 textView.insertText(attributedString, replacementRange: textView.selectedRange)
             #else
-                if (textView.typingAttributes[NSAttributedStringKey.underlineStyle.rawValue] == nil) {
-                    textView.typingAttributes[NSAttributedStringKey.underlineStyle.rawValue] = 1
+            if (textView.typingAttributes[.underlineStyle] == nil) {
+                textView.typingAttributes[.underlineStyle] = 1
                 } else {
-                    textView.typingAttributes.removeValue(forKey: NSAttributedStringKey.underlineStyle.rawValue)
+                    textView.typingAttributes.removeValue(forKey: .underlineStyle)
                 }
             #endif
         }
@@ -230,147 +339,160 @@ public class TextFormatter {
 
                 #if os(iOS)
                     self.textView.replace(selectedtTextRange, withText: attributedString.string)
-                    self.textView.selectedRange = selectedRange
                 #endif
 
+                self.textView.undoManager?.beginUndoGrouping()
                 self.storage.replaceCharacters(in: selectedRange, with: attributedString)
+                self.textView.undoManager?.endUndoGrouping()
+
+                self.textView.selectedRange = selectedRange
                 return
             }
             
             #if os(OSX)
                 if (textView.typingAttributes[.strikethroughStyle] == nil) {
-                    attributedString.addAttribute(NSAttributedStringKey.strikethroughStyle, value: 2, range: selectedRange)
+                    attributedString.addAttribute(NSAttributedString.Key.strikethroughStyle, value: 2, range: selectedRange)
                     textView.typingAttributes[.strikethroughStyle] = 2
                 } else {
-                    textView.typingAttributes.removeValue(forKey: NSAttributedStringKey(rawValue: "NSStrikethrough"))
+                    textView.typingAttributes.removeValue(forKey: NSAttributedString.Key(rawValue: "NSStrikethrough"))
                 }
             
                 textView.insertText(attributedString, replacementRange: textView.selectedRange)
             #else
-                if (textView.typingAttributes[NSAttributedStringKey.strikethroughStyle.rawValue] == nil) {
-                    textView.typingAttributes[NSAttributedStringKey.strikethroughStyle.rawValue] = 2
+                if (textView.typingAttributes[.strikethroughStyle] == nil) {
+                    textView.typingAttributes[.strikethroughStyle] = 2
                 } else {
-                    textView.typingAttributes.removeValue(forKey: NSAttributedStringKey.strikethroughStyle.rawValue)
+                    textView.typingAttributes.removeValue(forKey: .strikethroughStyle)
                 }
             #endif
         }
         
         if note.isMarkdown() {
-            let string = "~~" + attributedString.string + "~~"
-            let location = string.count == 4 ? range.location + 2 : range.upperBound + 4
-            
-            self.replaceWith(string: string)
-            setSelectedRange(NSMakeRange(location, 0))
+
+            // UnStrike if not selected
+            if range.length == 0 {
+                var resultFound = false
+                let string = getAttributedString().string
+
+                NotesTextProcessor.strikeRegex.matches(string, range: NSRange(0..<string.count)) { (result) -> Void in
+                    guard let range = result?.range else { return }
+
+                    if range.intersection(self.range) != nil {
+                        let italicAttributed = self.getAttributedString().attributedSubstring(from: range)
+
+                        self.unStrike(attributedString: italicAttributed, range: range)
+                        resultFound = true
+                    }
+                }
+
+                if resultFound {
+                    return
+                }
+            }
+
+            // UnStrike
+            if attributedString.string.contains("~~") {
+                unStrike(attributedString: attributedString, range: range)
+                return
+            }
+
+            var selectRange = NSMakeRange(range.location + 2, 0)
+            let string = attributedString.string
+            let length = string.count
+
+            if length != 0 {
+                selectRange = NSMakeRange(range.location, length + 4)
+            }
+
+            insertText("~~" + string + "~~", selectRange: selectRange)
         }
     }
     
     public func tab() {
         guard let pRange = getParagraphRange() else { return }
-        
-        guard range.length > 0 else {
-            let text = storage.attributedSubstring(from: pRange).string
-            #if os(OSX)
-                let location = textView.selectedRange().location
-                textView.insertText("\t" + text, replacementRange: pRange)
-                self.setSelectedRange(NSMakeRange(location + 1, 0))
-            #else
-                replaceWith(string: "\t" + text, range: pRange)
-                setSelectedRange(NSMakeRange(range.upperBound + 1, 0))
-            #endif
-            
-            if note.isMarkdown() {
-                highlight()
-            }
-            
-            return
-        }
-        
-        let string = storage.attributedSubstring(from: pRange).string
-        var lines = [String]()
+        let padding = UserDefaultsManagement.spacesInsteadTabs ? "    " : "\t"
+
+        let string = getAttributedString().attributedSubstring(from: pRange).string
+        var result = String()
+        var lineQty = 0
+
         string.enumerateLines { (line, _) in
-            lines.append("\t" + line)
+            result.append(padding + line + "\n")
+            lineQty += 1
         }
-        
-        var result = lines.joined(separator: "\n")
-        if pRange.upperBound != storage.length {
-           result = result + "\n"
-        }
-        
-        #if os(OSX)
-            textView.insertText(result, replacementRange: pRange)
-        #else
-            replaceWith(string: result)
-        #endif
-        
-        setSelectedRange(NSRange(location: pRange.lowerBound, length: result.count))
-        
-        if note.isMarkdown() {
-            highlight()
-        }
+
+        let selectRange = textView.selectedRange.length == 0 || lineQty == 1
+            ? NSRange(location: pRange.location + result.count - 1, length: 0)
+            : NSRange(location: pRange.location, length: result.count)
+
+        insertText(result, replacementRange: pRange, selectRange: selectRange)
     }
     
-    func unTab() {
+    public func unTab() {
         guard let pRange = getParagraphRange() else { return }
-        
-        guard range.length > 0 else {
-            var text = storage.attributedSubstring(from: pRange).string
-            guard text.count > 0, [" ", "\t"].contains(text.removeFirst()) else { return }
 
-            #if os(OSX)
-                textView.insertText(text, replacementRange: pRange)
-                self.setSelectedRange(NSMakeRange(pRange.lowerBound - 1 + text.count, 0))
-            #else
-                self.insertText(text, replacementRange: pRange)
-                self.setSelectedRange(NSRange(location: range.location - 1, length: 0))
-            #endif
-        
-            if note.isMarkdown() {
-                highlight()
-            }
-            
-            return
-        }
-        
         let string = storage.attributedSubstring(from: pRange).string
-        var resultList: [String] = []
+        var result = String()
+        var lineQty = 0
+
         string.enumerateLines { (line, _) in
             var line = line
-            if !line.isEmpty && [" ", "\t"].contains(line.first) {
-                line.removeFirst()
+
+            if !line.isEmpty {
+                if line.first == "\t" {
+                    line = String(line.dropFirst())
+                } else if line.starts(with: "    ") {
+                    line = String(line.dropFirst(4))
+                }
             }
             
-            resultList.append(line)
+            result.append(line + "\n")
+            lineQty += 1
         }
-        
-        var result = resultList.joined(separator: "\n")
-        if pRange.upperBound != storage.length {
-            result = result + "\n"
-        }
-        
-        #if os(OSX)
-            textView.insertText(result, replacementRange: pRange)
-        #else
-            replaceWith(string: result)
-        #endif
-        
-        setSelectedRange(NSRange(location: pRange.lowerBound, length: result.count))
-        
-        if note.isMarkdown() {
-            highlight()
-        }
+
+        let selectRange = textView.selectedRange.length == 0 || lineQty == 1
+            ? NSRange(location: pRange.location + result.count - 1, length: 0)
+            : NSRange(location: pRange.location, length: result.count)
+
+        insertText(result, replacementRange: pRange, selectRange: selectRange)
     }
     
     public func header(_ string: String) {
-        #if os(OSX)
-            let prefix = string + " "
-            let length = string.count + 1
-        #else
-            let prefix = string
-            let length = 1
-        #endif
-        
-        let select = NSMakeRange(range.location + length, 0)
-        self.insertText(prefix, replacementRange: range, selectRange: select)
+        guard let pRange = getParagraphRange() else { return }
+
+#if os(iOS)
+        var prefix = String()
+        var paragraph = storage.mutableString.substring(with: pRange)
+
+        if paragraph.starts(with: "######") {
+            paragraph = paragraph
+                .replacingOccurrences(of: "#", with: "")
+                .trim()
+        } else if paragraph.starts(with: "#") {
+            prefix = string
+        } else {
+            prefix = string + " "
+        }
+
+        let diff = paragraph.contains("\n") ? 1 : 0
+        let selectRange = NSRange(location: pRange.location + (prefix + paragraph).count - diff, length: 0)
+        insertText(prefix + paragraph, replacementRange: pRange, selectRange: selectRange)
+#else
+        let prefix = string + " "
+        var paragraph = storage.mutableString
+            .substring(with: pRange)
+
+        if paragraph.starts(with: prefix) {
+            paragraph = paragraph.replacingOccurrences(of: prefix, with: "")
+        } else {
+            paragraph =
+                prefix + paragraph.replacingOccurrences(of: "#", with: "").trim()
+        }
+
+        let diff = paragraph.contains("\n") ? 1 : 0
+        let selectRange = NSRange(location: pRange.location + paragraph.count - diff, length: 0)
+        insertText(paragraph, replacementRange: pRange, selectRange: selectRange)
+#endif
     }
     
     public func link() {
@@ -394,43 +516,7 @@ public class TextFormatter {
             setSelectedRange(NSMakeRange(range.upperBound + 4, 0))
         }
     }
-    
-    func highlight() {
-        let string = storage.string as NSString
-        if let paragraphRange = getParagraphRange(), let codeBlockRange = NotesTextProcessor.getCodeBlockRange(paragraphRange: paragraphRange, string: string),
-            codeBlockRange.upperBound <= storage.length,
-            UserDefaultsManagement.codeBlockHighlight {
-            NotesTextProcessor.highlightCode(range: codeBlockRange, storage: storage, string: string, note: note, async: true)
-        }
-    }
-    
-    public func deleteKey() {
-        let sRange = self.textView.selectedRange
-        
-        guard sRange.location > 0,
-            let pr = self.getParagraphRange(for: sRange.location),
-            let currentPR = getParagraphRange(),
-            self.note.isMarkdown()
-        else { return }
-        
-        // This is code block and not first position
-        
-        if isCodeBlock(range: pr) {
-            if pr.lowerBound != sRange.location {
-                let attributes = getCodeBlockAttributes()
-                storage.addAttributes(attributes, range: currentPR)
-            }
-        } else {
-            // Remove background if:
-            // 1) Cursor on paragraph first char
-            // 2) Paragraph contain new line
-            
-            if currentPR.lowerBound == self.textView.selectedRange.location && currentPR.length == 1  {
-                storage.removeAttribute(.backgroundColor, range: currentPR)
-            }
-        }
-    }
-    
+
     public func tabKey() {
         guard let currentPR = getParagraphRange() else { return }
         let paragraph = storage.attributedSubstring(from: currentPR).string
@@ -442,174 +528,265 @@ public class TextFormatter {
             && self.note.isMarkdown()
         {
             self.insertText("\t", replacementRange: sRange)
-            let attributes = self.getCodeBlockAttributes()
-            let attributeRange = NSRange(location: sRange.location, length: 2)
-            self.storage.addAttributes(attributes, range: attributeRange)
             return
         }
         
         // First & Last
         if (sRange.location == 0 || sRange.location == self.storage.length) && paragraph.count == 0 && self.note.isMarkdown() {
-            let codeStyle = self.addCodeBlockStyle("\t\n")
-            self.insertText(codeStyle, replacementRange: sRange)
+            #if os(OSX)
+            if textView.textStorage?.length == 0 {
+                EditTextView.shouldForceRescan = true
+            }
+            #else
+            if textView.textStorage.length == 0 {
+                EditTextView.shouldForceRescan = true
+            }
+            #endif
             
-            let attributes = self.getCodeBlockAttributes()
-            let attributeRange = NSRange(location: sRange.location, length: 2)
-            self.storage.addAttributes(attributes, range: attributeRange)
-            
+            self.insertText("\t\n", replacementRange: sRange)
             self.setSelectedRange(NSRange(location: sRange.location + 1, length: 0))
             return
         }
         
-        if self.isCodeBlock(range: currentPR), note.isMarkdown() {
-            self.insertText("\t", replacementRange: sRange)
-            
-            let attributes = self.getCodeBlockAttributes()
-            let attributeRange = NSRange(location: sRange.location, length: 1)
-            self.storage.addAttributes(attributes, range: attributeRange)
-            
-            self.setSelectedRange(NSRange(location: sRange.location + 1, length: 0))
-            return
-        }
-        
-        self.insertText("\t", replacementRange: self.textView.selectedRange)
+        self.insertText("\t")
     }
-    
-    public func newLine() {
-        
-        // Before new line inserted. CodeBlock margin autocomplete and style
-        
-        guard let currentParagraphRange = self.getParagraphRange() else { return }
-        
-        let currentParagraph = storage.attributedSubstring(from: currentParagraphRange)
-        var selectedRange = self.textView.selectedRange
-        var result = "\n"
-        
-        if currentParagraphRange.lowerBound != textView.selectedRange.location,
-           let newLinePadding = currentParagraph.string.getPrefixMatchSequentially(char: "\t") {
-            result.append(newLinePadding)
-            let styledCode = self.addCodeBlockStyle(result)
-            self.insertText(styledCode, replacementRange: selectedRange)
+
+    public static func getAutocompleteCharsMatch(string: String) -> NSTextCheckingResult? {
+        guard let regex = try? NSRegularExpression(pattern:
+            "^(( |\t)*\\- \\[[x| ]*\\] )|^(( |\t)*[-|–|—|*|•|>|\\+]{1} )"), let result = regex.firstMatch(in: string, range: NSRange(0..<string.count)) else { return nil }
+
+        return result
+    }
+
+    public static func getAutocompleteDigitsMatch(string: String) -> NSTextCheckingResult? {
+        guard let regex = try? NSRegularExpression(pattern: "^(( |\t)*[0-9]+\\. )"), let result = regex.firstMatch(in: string, range: NSRange(0..<string.count)) else { return nil }
+
+        return result
+    }
+
+    private func matchChars(string: NSAttributedString, match: NSTextCheckingResult, prefix: String? = nil) {
+        guard string.length >= match.range.upperBound else { return }
+
+        let found = string.attributedSubstring(from: match.range).string
+        var newLine = 1
+
+        if textView.selectedRange.upperBound == storage.length {
+            newLine = 0
+        }
+
+        if found.count + newLine == string.length {
+            let range = storage.mutableString.paragraphRange(for: textView.selectedRange)
+            let selectRange = NSRange(location: range.location, length: 0)
+            insertText("\n", replacementRange: range, selectRange: selectRange)
             return
         }
-        
-        // New Line insertion
-        
-        self.insertText("\n", replacementRange: selectedRange)
-        
-        // Fenced code block style handler
-        
-        if let fencedRange = NotesTextProcessor.getFencedCodeBlockRange(paragraphRange: currentParagraphRange, string: storage.string), self.note.isMarkdown() {
-            let attributes = self.getCodeBlockAttributes()
-            self.storage.addAttributes(attributes, range: fencedRange)
-        }
-        
-        // Autocomplete unordered lists
-        
-        selectedRange = self.textView.selectedRange
-        guard self.storage.length > selectedRange.lowerBound - 1 else { return }
-        
-        let nsString = storage.string as NSString
-        let prevParagraphRange = nsString.paragraphRange(for: NSMakeRange(selectedRange.lowerBound - 1, 0))
-        
-        #if os(iOS)
-            // Autocomplete rendered todo
 
-            let todoKey = NSAttributedStringKey(rawValue: "co.fluder.fsnotes.image.todo")
-            if self.note.isMarkdown(), self.textView.textStorage.attribute(todoKey, at: prevParagraphRange.location, effectiveRange: nil) != nil,
-                let unchecked = AttributedBox.getUnChecked() {
-                let newLineSuggestion = prevParagraphRange.location + 2
-                let newLineSuggestionRange = NSRange(location: newLineSuggestion, length: 1)
-                
-                if storage.attributedSubstring(from: newLineSuggestionRange).string == "\n" {
-                    self.setSelectedRange(prevParagraphRange)
-                    textView.deleteBackward()
+        insertText("\n" + found)
+    }
+
+    private func matchDigits(string: NSAttributedString, match: NSTextCheckingResult) {
+        guard string.length >= match.range.upperBound else { return }
+
+        let found = string.attributedSubstring(from: match.range).string
+        var newLine = 1
+
+        if textView.selectedRange.upperBound == storage.length {
+            newLine = 0
+        }
+
+        if found.count + newLine == string.length {
+            let range = storage.mutableString.paragraphRange(for: textView.selectedRange)
+            let selectRange = NSRange(location: range.location, length: 0)
+            insertText("\n", replacementRange: range, selectRange: selectRange)
+            return
+        }
+
+        if let position = Int(found.replacingOccurrences(of:"[^0-9]", with: "", options: .regularExpression)) {
+            let newDigit = found.replacingOccurrences(of: String(position), with: String(position + 1))
+            insertText("\n" + newDigit)
+        }
+    }
+
+    public func newLine() {
+        guard let currentParagraphRange = self.getParagraphRange() else { return }
+
+        let currentParagraph = storage.attributedSubstring(from: currentParagraphRange)
+        let selectedRange = self.textView.selectedRange
+
+        // Autocomplete todo lists
+
+        if selectedRange.location != currentParagraphRange.location && currentParagraphRange.upperBound - 2 < selectedRange.location, currentParagraph.length >= 2 {
+
+            if textView.selectedRange.upperBound > 2 {
+                let char = storage.attributedSubstring(from: NSRange(location: textView.selectedRange.upperBound - 2, length: 1))
+
+                if let _ = char.attribute(.todo, at: 0, effectiveRange: nil) {
+                    let selectRange = NSRange(location: currentParagraphRange.location, length: 0)
+                    insertText("\n", replacementRange: currentParagraphRange, selectRange: selectRange)
                     return
                 }
-                
-                self.insertText("  ")
-                let newRange = NSRange(location: selectedRange.location, length: 2)
-                self.textView.textStorage.replaceCharacters(in: newRange, with: unchecked)
-                return
             }
- 
-        #endif
-        
-        let prevString = nsString.substring(with: prevParagraphRange)
-        let nsPrev = prevString as NSString
-    
-        guard let regex = try? NSRegularExpression(pattern: "^(( |\t)*\\- \\[[x| ]*\\] )|^( |\t)*([-|–|—|*|•|\\+]{1} )"),
-            let regexDigits = try? NSRegularExpression(pattern: "^(?: |\t)*([0-9])+\\. ") else {
-                return
-        }
-        
-        if prevString.starts(with: "\t") {
-            if let newLinePadding = prevString.getPrefixMatchSequentially(char: "\t") {
-                self.insertText(newLinePadding, replacementRange: selectedRange)
+
+            var todoLocation = -1
+            currentParagraph.enumerateAttribute(.todo, in: NSRange(0..<currentParagraph.length), options: []) { (value, range, stop) -> Void in
+                guard value != nil else { return }
+
+                todoLocation = range.location
+                stop.pointee = true
             }
-        }
-        
-        if let match = regex.firstMatch(in: prevString, range: NSRange(0..<nsPrev.length)) {
-            var prefix = nsPrev.substring(with: match.range)
-            
-            if prevString == prefix + "\n" {
-                self.setSelectedRange(prevParagraphRange)
-                #if os(OSX)
-                    textView.delete(nil)
-                #else
-                    textView.deleteBackward()
-                #endif
-                return
-            }
-            
-            if prefix == "- [x] " {
-                prefix = "- [ ] "
-            }
-            
-            #if os(iOS)
-                textView.insertText(prefix)
+
+            if todoLocation > -1 {
+                let unchecked = AttributedBox.getUnChecked()?.attributedSubstring(from: NSRange(0..<2))
+                var prefix = String()
+
+                if todoLocation > 0 {
+                    prefix = currentParagraph.attributedSubstring(from: NSRange(0..<todoLocation)).string
+                }
+
+            #if os(OSX)
+                let string = NSMutableAttributedString(string: "\n" + prefix)
+                string.append(unchecked!)
+                self.insertText(string)
             #else
-                textView.insertText(prefix, replacementRange: textView.selectedRange())
+                let selectedRange = textView.selectedRange
+                let selectedTextRange = textView.selectedTextRange!
+                let checkbox = NSMutableAttributedString(string: "\n" + prefix)
+                checkbox.append(unchecked!)
+
+                textView.undoManager?.beginUndoGrouping()
+                textView.replace(selectedTextRange, withText: checkbox.string)
+                textView.textStorage.replaceCharacters(in: NSRange(location: selectedRange.location, length: checkbox.length), with: checkbox)
+                textView.undoManager?.endUndoGrouping()
             #endif
+                return
+            }
+        }
+
+        // Autocomplete ordered and unordered lists
+
+        if selectedRange.location != currentParagraphRange.location && currentParagraphRange.upperBound - 2 < selectedRange.location {
+            if let charsMatch = TextFormatter.getAutocompleteCharsMatch(string: currentParagraph.string) {
+                self.matchChars(string: currentParagraph, match: charsMatch)
+                return
+            }
+
+            if let digitsMatch = TextFormatter.getAutocompleteDigitsMatch(string: currentParagraph.string) {
+                self.matchDigits(string: currentParagraph, match: digitsMatch)
+                return
+            }
+        }
+
+        // New Line insertion
+
+        var newLine = "\n"
+
+        if currentParagraph.string.starts(with: "\t"), let prefix = currentParagraph.string.getPrefixMatchSequentially(char: "\t") {
+            if selectedRange.location != currentParagraphRange.location {
+                newLine += prefix
+            }
+
+            let string = TextFormatter.getAttributedCode(string: newLine)
+            self.insertText(string)
             return
         }
-        
-        // Autocomplete ordered lists
-        
-        if let matchDigits = regexDigits.firstMatch(in: prevString, range: NSRange(0..<nsPrev.length)) {
-            let prefix = nsPrev.substring(with: matchDigits.range)
-            if prevString == prefix + "\n" {
-                #if os(OSX)
-                    textView.setSelectedRange(prevParagraphRange)
-                    textView.delete(nil)
-                #else
-                    textView.selectedRange = prevParagraphRange
-                    textView.deleteBackward()
-                #endif
-                return
+
+        if currentParagraph.string.starts(with: "    "),
+            let prefix = currentParagraph.string.getPrefixMatchSequentially(char: " ") {
+            if selectedRange.location != currentParagraphRange.location {
+                newLine += prefix
             }
-            
-            if let position = Int(prefix.replacingOccurrences( of:"[^0-9]", with: "", options: .regularExpression)) {
-                #if os(iOS)
-                    textView.insertText(prefix.replacingOccurrences(of: String(position), with: String(position + 1)))
-                #else
-                    textView.insertText(prefix.replacingOccurrences(of: String(position), with: String(position + 1)), replacementRange: textView.selectedRange())
-                #endif
-                
+
+            let string = TextFormatter.getAttributedCode(string: newLine)
+            self.insertText(string)
+            return
+        }
+
+        #if os(iOS)
+            self.textView.insertText("\n")
+        #else
+            self.textView.insertNewline(nil)
+        #endif
+    }
+
+    public func todo() {
+        guard let pRange = getParagraphRange() else { return }
+
+        let attributedString = getAttributedString().attributedSubstring(from: pRange)
+        let mutable = NSMutableAttributedString(attributedString: attributedString).unLoadCheckboxes()
+
+        if !attributedString.hasTodoAttribute() && selectedRange.length == 0 {
+            insertText(AttributedBox.getUnChecked()!)
+            return
+        }
+
+        var lines = [String]()
+        var addPrefixes = false
+        var addCompleted = false
+        let string = mutable.string
+
+        string.enumerateLines { (line, _) in
+            let result = self.parseTodo(line: line)
+            addPrefixes = !result.0
+            addCompleted = result.1
+            lines.append(result.2)
+        }
+
+        var result = String()
+        for line in lines {
+            if addPrefixes {
+                let task = addCompleted ? "- [x] " : "- [ ] "
+                var empty = String()
+                var scanFinished = false
+
+                if line.count > 0 {
+                    for char in line {
+                        if char.isWhitespace && !scanFinished {
+                            empty.append(char)
+                        } else {
+                            if !scanFinished {
+                                empty.append(task + "\(char)")
+                                scanFinished = true
+                            } else {
+                                empty.append(char)
+                            }
+                        }
+                    }
+
+                    result += empty + "\n"
+                } else {
+                    result += task + "\n"
+                }
+            } else {
+                result += line + "\n"
             }
         }
+
+        let mutableResult = NSMutableAttributedString(string: result)
+
+#if os(iOS)
+        let textColor: UIColor = NightNight.theme == .night ? UIColor.white : UIColor.black
+        mutableResult.addAttribute(.foregroundColor, value: textColor, range: NSRange(location: 0, length: mutableResult.length))
+        mutableResult.addAttribute(.font, value: NotesTextProcessor.font, range: NSRange(location: 0, length: mutableResult.length))
+#endif
+
+        mutableResult.loadCheckboxes()
+
+        let diff = mutableResult.length - attributedString.length
+        let selectRange = selectedRange.length == 0 || lines.count == 1
+            ? NSRange(location: pRange.location + pRange.length + diff - 1, length: 0)
+            : NSRange(location: pRange.location, length: mutableResult.length)
+
+        insertText(mutableResult, replacementRange: pRange, selectRange: selectRange)
     }
 
     public func toggleTodo(_ location: Int? = nil) {
-
-        #if os(iOS)
-        let todoKey = NSAttributedStringKey(rawValue: "co.fluder.fsnotes.image.todo")
-        
-        if let location = location, let todoAttr = storage.attribute(todoKey, at: location, effectiveRange: nil) as? Int {
+        if let location = location, let todoAttr = storage.attribute(.todo, at: location, effectiveRange: nil) as? Int {
             let attributedText = (todoAttr == 0) ? AttributedBox.getChecked() : AttributedBox.getUnChecked()
 
+            self.textView.undoManager?.beginUndoGrouping()
             self.storage.replaceCharacters(in: NSRange(location: location, length: 1), with: (attributedText?.attributedSubstring(from: NSRange(0..<1)))!)
-            
+            self.textView.undoManager?.endUndoGrouping()
+
             guard let paragraph = getParagraphRange(for: location) else { return }
             
             if todoAttr == 0 {
@@ -619,68 +796,193 @@ public class TextFormatter {
             }
             
             if paragraph.contains(location) {
-                if todoAttr == 0 {
-                    textView.typingAttributes[NSAttributedStringKey.strikethroughStyle.rawValue] = 1
-                } else {
-                    textView.typingAttributes[NSAttributedStringKey.strikethroughStyle.rawValue] = 0
-                }
+                let strike = (todoAttr == 0) ? 1 : 0
+                #if os(OSX)
+                    textView.typingAttributes[.strikethroughStyle] = strike
+                #else
+                    textView.typingAttributes[.strikethroughStyle] = strike
+                #endif
             }
             
             return
         }
-        #endif
 
         guard var paragraphRange = getParagraphRange() else { return }
-        
-        if let location = location{
+
+        if let location = location {
             let string = self.storage.string as NSString
             paragraphRange = string.paragraphRange(for: NSRange(location: location, length: 0))
         } else {
-            let range = NSRange(location: paragraphRange.location, length: 0)
-            
-            #if os(iOS)
-            if let attributedText = AttributedBox.getUnChecked() {
-                self.insertText("  ", replacementRange: range)
-                let newRange = NSRange(location: textView.selectedRange.location - 2, length: 2)
-                self.textView.textStorage.replaceCharacters(in: newRange, with: attributedText)
+            guard let attributedText = AttributedBox.getUnChecked() else { return }
+
+
+            // Toggle render if exist in current paragraph
+            var rangeFound = false
+            let attributedParagraph = self.storage.attributedSubstring(from: paragraphRange)
+            attributedParagraph.enumerateAttribute(.todo, in: NSRange(0..<attributedParagraph.length), options: []) { value, range, stop in
+
+                if let value = value as? Int {
+                    let attributedText = (value == 0) ? AttributedBox.getCleanChecked() : AttributedBox.getCleanUnchecked()
+                    let existsRange = NSRange(location: paragraphRange.lowerBound + range.location, length: 1)
+
+                    self.textView.undoManager?.beginUndoGrouping()
+                    self.storage.replaceCharacters(in: existsRange, with: attributedText)
+                    self.textView.undoManager?.endUndoGrouping()
+
+                    stop.pointee = true
+                    rangeFound = true
+                }
             }
-            #else
-                let attributedText = self.getAttributedTodoString("- [ ] ")
-                self.insertText(attributedText, replacementRange: range)
-            #endif
-            
+
+            guard !rangeFound else { return }
+
+#if os(iOS)
+            if let selTextRange = self.textView.selectedTextRange {
+                let newRange = NSRange(location: self.textView.selectedRange.location, length: attributedText.length)
+                self.textView.undoManager?.beginUndoGrouping()
+                self.textView.replace(selTextRange, withText: attributedText.string)
+                self.storage.replaceCharacters(in: newRange, with: attributedText)
+                self.textView.undoManager?.endUndoGrouping()
+            }
+#else
+            self.insertText(attributedText)
+#endif
             return
         }
         
         let paragraph = self.storage.attributedSubstring(from: paragraphRange)
         
-        if paragraph.string.hasPrefix("- [ ]") {
-            let range = NSRange(location: paragraphRange.location, length: 5)
+        if let index = paragraph.string.range(of: "- [ ]") {
+            let local = paragraph.string.nsRange(from: index).location
+            let range = NSMakeRange(paragraphRange.location + local, 5)
+            if let attributedText = AttributedBox.getChecked() {
+                self.insertText(attributedText, replacementRange: range)
+            }
             
-            #if os(iOS)
-                let attributedText = AttributedBox.getChecked()
-            #else
-                let attributedText = self.getAttributedTodoString("- [x]")
-            #endif
+            return
+
+        } else if let index = paragraph.string.range(of: "- [x]") {
+            let local = paragraph.string.nsRange(from: index).location
+            let range = NSMakeRange(paragraphRange.location + local, 5)
+            if let attributedText = AttributedBox.getUnChecked() {
+                self.insertText(attributedText, replacementRange: range)
+            }
             
-            self.insertText(attributedText, replacementRange: range)
-        } else if paragraph.string.hasPrefix("- [x]") {
-            let range = NSRange(location: paragraphRange.location, length: 5)
-            
-            #if os(iOS)
-                let attributedText = AttributedBox.getUnChecked()
-            #else
-                let attributedText = self.getAttributedTodoString("- [ ]")
-            #endif
-            
-            self.insertText(attributedText, replacementRange: range)
+            return
         }
+    }
+
+    public func backTick() {
+        let selectedRange = textView.selectedRange
+
+        if selectedRange.length > 0 {
+            let text = storage.attributedSubstring(from: selectedRange).string
+            let string = "`\(text)`"
+
+            if let codeFont = UserDefaultsManagement.codeFont {
+                let mutableString = NSMutableAttributedString(string: string)
+                mutableString.addAttribute(.font, value: codeFont, range: NSRange(0..<string.count))
+
+                EditTextView.shouldForceRescan = true
+                insertText(mutableString, replacementRange: selectedRange)
+                return
+            }
+        }
+
+        insertText("``")
+        setSelectedRange(NSRange(location: selectedRange.location, length: selectedRange.length + 1))
+    }
+
+    public func codeBlock() {
+        EditTextView.shouldForceRescan = true
+
+        let currentRange = textView.selectedRange
+        if currentRange.length > 0 {
+            let substring = storage.attributedSubstring(from: currentRange)
+            let mutable = NSMutableAttributedString(string: "```\n")
+            mutable.append(substring)
+
+            if substring.string.last != "\n" {
+                mutable.append(NSAttributedString(string: "\n"))
+            }
+            
+            mutable.append(NSAttributedString(string: "```\n"))
+
+            insertText(mutable.string, replacementRange: currentRange)
+            setSelectedRange(NSRange(location: currentRange.location + 3, length: 0))
+            return
+        }
+
+        insertText("```\n\n```\n")
+        setSelectedRange(NSRange(location: currentRange.location + 4, length: 0))
+    }
+
+    public func quote() {
+        EditTextView.shouldForceRescan = true
+
+        guard let pRange = getParagraphRange() else { return }
+        let paragraph = storage.mutableString.substring(with: pRange)
+
+        guard paragraph.isContainsLetters else {
+            insertText("> ")
+            return
+        }
+
+        var hasPrefix = false
+        var lines = [String]()
+
+        paragraph.enumerateLines { (line, _) in
+            hasPrefix = line.starts(with: "> ")
+
+            var skipNext = false
+            var scanFinished = false
+            var cleanLine = String()
+
+            for char in line {
+                if skipNext {
+                    skipNext = false
+                    continue
+                }
+
+                if char == ">" && !scanFinished {
+                    skipNext = true
+                    scanFinished = true
+                } else {
+                    cleanLine.append(char)
+                }
+            }
+
+            lines.append(cleanLine)
+        }
+
+        var result = String()
+        for line in lines {
+            if hasPrefix {
+                result += line + "\n"
+            } else {
+                result += "> " + line + "\n"
+            }
+        }
+
+        let selectRange = selectedRange.length == 0 || lines.count == 1
+            ? NSRange(location: pRange.location + result.count - 1, length: 0)
+            : NSRange(location: pRange.location, length: result.count)
+
+        insertText(result, replacementRange: pRange, selectRange: selectRange)
     }
     
     private func getAttributedTodoString(_ string: String) -> NSAttributedString {
         let string = NSMutableAttributedString(string: string)
         string.addAttribute(.foregroundColor, value: NotesTextProcessor.syntaxColor, range: NSRange(0..<1))
-        string.addAttribute(.foregroundColor, value: Color.black, range: NSRange(1..<string.length))
+
+        var color = Color.black
+        #if os(OSX)
+        if UserDefaultsManagement.appearanceType != AppearanceType.Custom, #available(OSX 10.13, *) {
+            color = NSColor(named: "mainText")!
+        }
+        #endif
+
+        string.addAttribute(.foregroundColor, value: color, range: NSRange(1..<string.length))
         return string
     }
     
@@ -706,9 +1008,7 @@ public class TextFormatter {
                 r = range
             }
         
-            textView.undoManager?.beginUndoGrouping()
             textView.insertText(string, replacementRange: r)
-            textView.undoManager?.endUndoGrouping()
         #endif
     }
     
@@ -721,7 +1021,7 @@ public class TextFormatter {
         if note.isMarkdown() {
             if var font = UserDefaultsManagement.noteFont {
                 #if os(iOS)
-                if #available(iOS 11.0, *) {
+                if #available(iOS 11.0, *), UserDefaultsManagement.dynamicTypeFont {
                     let fontMetrics = UIFontMetrics(forTextStyle: .body)
                     font = fontMetrics.scaledFont(for: font)
                 }
@@ -732,7 +1032,7 @@ public class TextFormatter {
         }
         
         if self.shouldScanMarkdown, let paragraphRange = getParagraphRange() {
-            NotesTextProcessor.scanMarkdownSyntax(storage, paragraphRange: paragraphRange, note: note)
+            NotesTextProcessor.highlightMarkdown(attributedString: storage, paragraphRange: paragraphRange, note: note)
         }
         
         if note.isMarkdown() || note.type == .RichText {
@@ -744,9 +1044,8 @@ public class TextFormatter {
                 text = textView.attributedText
             #endif
             
-            if let t = text {
-                note.content = NSMutableAttributedString(attributedString: t)
-                note.save()
+            if let attributed = text {
+                note.save(attributed: attributed)
             }
         }
         
@@ -756,9 +1055,8 @@ public class TextFormatter {
     }
     
     func getParagraphRange() -> NSRange? {
-        let string = storage.string as NSString
-        if range.upperBound <= string.length {
-            let paragraph = string.paragraphRange(for: range)
+        if range.upperBound <= storage.length {
+            let paragraph = storage.mutableString.paragraphRange(for: range)
             return paragraph
         }
         
@@ -766,9 +1064,10 @@ public class TextFormatter {
     }
     
     private func getParagraphRange(for location: Int) -> NSRange? {
-        let string = storage.string as NSString
+        guard location <= storage.length else { return nil}
+
         let range = NSRange(location: location, length: 0)
-        let paragraphRange = string.paragraphRange(for: range)
+        let paragraphRange = storage.mutableString.paragraphRange(for: range)
         
         return paragraphRange
     }
@@ -816,12 +1115,22 @@ public class TextFormatter {
     private func getDefaultFont() -> UIFont {
         var font = UserDefaultsManagement.noteFont!
 
-        if #available(iOS 11.0, *) {
+        if UserDefaultsManagement.dynamicTypeFont {
             let fontMetrics = UIFontMetrics(forTextStyle: .body)
             font = fontMetrics.scaledFont(for: font)
         }
 
         return font
+    }
+    #endif
+
+    #if os(OSX)
+    private func getDefaultColor() -> NSColor {
+        var color = Color.black
+        if UserDefaultsManagement.appearanceType != AppearanceType.Custom, #available(OSX 10.13, *) {
+            color = NSColor(named: "mainText")!
+        }
+        return color
     }
     #endif
     
@@ -830,7 +1139,7 @@ public class TextFormatter {
             textView.typingAttributes[.font] = font
         #else
             textView.typingFont = font
-            textView.typingAttributes[NSAttributedStringKey.font.rawValue] = font
+            textView.typingAttributes[.font] = font
         #endif
     }
         
@@ -852,33 +1161,16 @@ public class TextFormatter {
         #endif
     }
     
-    private func addCodeBlockStyle(_ text: String) -> NSMutableAttributedString {
-        let attributedText = NSMutableAttributedString(string: text)
-        
-        guard attributedText.length > 0, self.note.isMarkdown() else { return attributedText }
-        
-        let range = NSRange(0..<text.count)
-        attributedText.addAttributes(self.getCodeBlockAttributes(), range: range)
-        
-        return attributedText
-    }
-    
-    private func getCodeBlockAttributes() -> [NSAttributedStringKey : Any] {
+    public static func getCodeParagraphStyle() -> NSMutableParagraphStyle {
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.lineSpacing = CGFloat(UserDefaultsManagement.editorLineSpacing)
-        
-        var attributes: [NSAttributedStringKey : Any] = [
-            .backgroundColor: NotesTextProcessor.codeBackground,
-            .paragraphStyle: paragraphStyle
-        ]
-        
-        if let font = NotesTextProcessor.codeFont {
-            attributes[.font] = font
-        }
-        
-        return attributes
+        #if os(OSX)
+        paragraphStyle.textBlocks = [CodeBlock()]
+        #endif
+
+        return paragraphStyle
     }
-    
+
     private func insertText(_ string: Any, replacementRange: NSRange? = nil, selectRange: NSRange? = nil) {
         let range = replacementRange ?? self.textView.selectedRange
         
@@ -900,27 +1192,281 @@ public class TextFormatter {
     
         self.textView.undoManager?.beginUndoGrouping()
         self.textView.replace(selectedRange, withText: replaceString)
+
+        if let string = string as? NSAttributedString {
+            storage.replaceCharacters(in: NSRange(location: range.location, length: replaceString.count), with: string)
+        }
+
+        let parRange = NSRange(location: range.location, length: replaceString.count)
+        let parStyle = NSMutableParagraphStyle()
+        parStyle.alignment = .left
+        parStyle.lineSpacing = CGFloat(UserDefaultsManagement.editorLineSpacing)
+        self.textView.textStorage.addAttribute(.paragraphStyle, value: parStyle, range: parRange)
+
         self.textView.undoManager?.endUndoGrouping()
     #else
-        self.textView.insertText(string, replacementRange: range)
+        textView.insertText(string, replacementRange: range)
     #endif
         
         if let select = selectRange {
             setSelectedRange(select)
         }
     }
-    
-    private func isCodeBlock(range: NSRange) -> Bool {
-        let string = self.storage.attributedSubstring(from: range).string
-        
-        if string.starts(with: "\t") || string.starts(with: "    ") {
-            return true
+
+    public static func getAttributedCode(string: String) -> NSMutableAttributedString {
+        let attributedString = NSMutableAttributedString(string: string)
+        let range = NSRange(0..<attributedString.length)
+
+        attributedString.addAttribute(.font, value: NotesTextProcessor.codeFont, range: range)
+        return attributedString
+    }
+
+    public func list() {
+        guard let pRange = getParagraphRange() else { return }
+
+        let string = getAttributedString().attributedSubstring(from: pRange).string
+
+        guard string.isContainsLetters else {
+            insertText("- ")
+            return
         }
-        
-        if nil != NotesTextProcessor.getFencedCodeBlockRange(paragraphRange: range, string: self.storage.string) {
-            return true
+
+        var lines = [String]()
+        var addPrefixes = false
+
+        string.enumerateLines { (line, _) in
+            addPrefixes = !self.hasPrefix(line: line, numbers: false)
+            let cleanLine = self.cleanListItem(line: line)
+            lines.append(cleanLine)
         }
-        
+
+        var result = String()
+        for line in lines {
+            if addPrefixes {
+                var empty = String()
+                var scanFinished = false
+
+                for char in line {
+                    if char.isWhitespace && !scanFinished {
+                        empty.append(char)
+                    } else {
+                        if !scanFinished {
+                            empty.append("- \(char)")
+                            scanFinished = true
+                        } else {
+                            empty.append(char)
+                        }
+                    }
+                }
+
+                result += empty + "\n"
+            } else {
+                result += line + "\n"
+            }
+        }
+
+        let selectRange = selectedRange.length == 0 || lines.count == 1
+            ? NSRange(location: pRange.location + result.count - 1, length: 0)
+            : NSRange(location: pRange.location, length: result.count)
+
+        insertText(result, replacementRange: pRange, selectRange: selectRange)
+    }
+
+    public func orderedList() {
+        guard let pRange = getParagraphRange() else { return }
+
+        let string = getAttributedString().attributedSubstring(from: pRange).string
+
+        guard string.isContainsLetters else {
+            insertText("1. ")
+            return
+        }
+
+        var lines = [String]()
+        var addPrefixes = false
+
+        string.enumerateLines { (line, _) in
+            addPrefixes = !self.hasPrefix(line: line, numbers: true)
+            let cleanLine = self.cleanListItem(line: line)
+            lines.append(cleanLine)
+        }
+
+        var result = String()
+        var i = 1
+        var deep = 0
+
+        for line in lines {
+            if addPrefixes {
+                var empty = String()
+                var scanFinished = false
+                var lineDeep = 0
+
+                for char in line {
+                    if char.isWhitespace && !scanFinished {
+                        empty.append(char)
+                        lineDeep += 1
+                    } else {
+                        if !scanFinished {
+
+                            // Resets numeration on deeper lvl
+                            if lineDeep != deep {
+                                i = 1
+                                deep = lineDeep
+                            }
+
+                            empty.append("\(i). \(char)")
+                            scanFinished = true
+                        } else {
+                            empty.append(char)
+                        }
+                    }
+                }
+
+
+                result += empty + "\n"
+                i += 1
+            } else {
+                result += line + "\n"
+            }
+        }
+
+        let selectRange = selectedRange.length == 0 || lines.count == 1
+            ? NSRange(location: pRange.location + result.count - 1, length: 0)
+            : NSRange(location: pRange.location, length: result.count)
+
+        insertText(result, replacementRange: pRange, selectRange: selectRange)
+    }
+
+    private func cleanListItem(line: String) -> String {
+        var cleanLine = String()
+        var prefixFound = false
+
+        var numberCheck = false
+        var spaceCheck = false
+        var dotCheck = false
+
+        var skipped = String()
+
+        for char in line {
+            if numberCheck {
+                if char.isNumber {
+                    skipped.append(char)
+                    continue
+                } else {
+                    numberCheck = false
+                    dotCheck = true
+                }
+            }
+
+            if dotCheck {
+                if char == "." {
+                    skipped.append(char)
+                    spaceCheck = true
+                } else {
+                    cleanLine.append(skipped)
+                    cleanLine.append(char)
+                    skipped = ""
+                }
+
+                dotCheck = false
+                continue
+            }
+
+            if spaceCheck {
+                if char.isWhitespace {
+                } else {
+                    cleanLine.append(skipped)
+                    cleanLine.append(char)
+                }
+
+                spaceCheck = false
+                skipped = ""
+                continue
+            }
+
+            if char.isWhitespace && !prefixFound {
+                cleanLine.append(char)
+            } else if !prefixFound {
+                if char.isNumber {
+                    numberCheck = true
+                    skipped.append(char)
+                } else if char == "-" {
+                    spaceCheck = true
+                    skipped.append(char)
+                } else {
+                    cleanLine.append(char)
+                }
+                prefixFound = true
+            } else {
+                cleanLine.append(char)
+            }
+        }
+
+        if skipped.count > 0 {
+            cleanLine.append(skipped)
+        }
+
+        return cleanLine
+    }
+
+    private func parseTodo(line: String) -> (Bool, Bool, String) {
+        var count = 0
+        var hasTodoPrefix = false
+        var hasIncompletedTask = false
+        var charFound = false
+        var whitespacePrefix = String()
+        var letterPrefix = String()
+
+        for char in line {
+            if char.isWhitespace && !charFound {
+                count += 1
+                whitespacePrefix.append(char)
+                continue
+            } else {
+                charFound = true
+                letterPrefix.append(char)
+            }
+        }
+
+        if letterPrefix.starts(with: "- [ ] ") {
+            hasTodoPrefix = false
+            hasIncompletedTask = true
+        }
+
+        if letterPrefix.starts(with: "- [x] ") {
+            hasTodoPrefix = true
+        }
+
+        letterPrefix =
+            letterPrefix
+                .replacingOccurrences(of: "- [ ] ", with: "")
+                .replacingOccurrences(of: "- [x] ", with: "")
+
+        return (hasTodoPrefix, hasIncompletedTask, whitespacePrefix + letterPrefix)
+    }
+
+    private func hasPrefix(line: String, numbers: Bool) -> Bool {
+        var checkNumberDot = false
+
+        for char in line {
+            if checkNumberDot {
+                if char == "." {
+                    return numbers
+                }
+            }
+
+            if char.isWhitespace {
+                continue
+            } else {
+                if char.isNumber {
+                    checkNumberDot = true
+                    continue
+                } else if char == "-" {
+                    return !numbers
+                }
+            }
+        }
+
         return false
     }
 }

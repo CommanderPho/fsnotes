@@ -10,39 +10,41 @@ import UIKit
 import NightNight
 
 class DefaultExtensionViewController: UITableViewController {
-    private var extensions = ["md", "txt", "rtf", "markdown", "fountain", "textbundle"]
+    private var extensions = ["md", "rtf"]
     
     override func viewDidLoad() {
-        navigationController?.navigationBar.mixedTitleTextAttributes = [NNForegroundColorAttributeName: MixedColor(normal: 0x000000, night: 0xfafafa)]
+        navigationController?.navigationBar.mixedTitleTextAttributes = [NNForegroundColorAttributeName: Colors.titleText]
         navigationController?.navigationBar.mixedTintColor = MixedColor(normal: 0x4d8be6, night: 0x7eeba1)
         navigationController?.navigationBar.mixedBarTintColor = Colors.Header
         
-        view.mixedBackgroundColor = MixedColor(normal: 0xffffff, night: 0x2e2c32)
+        view.mixedBackgroundColor = MixedColor(normal: 0xffffff, night: 0x000000)
         
         super.viewDidLoad()
         
-        self.navigationItem.leftItemsSupplementBackButton = true
-        self.navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Back", style: UIBarButtonItemStyle.plain, target: self, action: #selector(DefaultExtensionViewController.cancel))
-        self.title = "Default Extension"
+        self.navigationItem.leftBarButtonItem = Buttons.getBack(target: self, selector: #selector(cancel))
+
+        self.title = NSLocalizedString("Default Extension", comment: "Settings")
     }
     
     @objc func cancel() {
-        self.dismiss(animated: true, completion: nil)
+        self.navigationController?.popViewController(animated: true)
     }
     
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        if let cell = tableView.cellForRow(at: indexPath), let label = cell.textLabel {
-            UserDefaultsManagement.storageExtension = label.text!
-            
-            self.dismiss(animated: true, completion: nil)
+        if let cell = tableView.cellForRow(at: indexPath), let label = cell.textLabel, let text = label.text {
+            UserDefaultsManagement.fileFormat = NoteType.withExt(rawValue: text)
+
+            self.navigationController?.popViewController(animated: true)
         }
     }
     
     override func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
-        cell.mixedBackgroundColor = MixedColor(normal: 0xffffff, night: 0x2e2c32)
+        cell.mixedBackgroundColor = MixedColor(normal: 0xffffff, night: 0x000000)
         cell.textLabel?.mixedTextColor = MixedColor(normal: 0x000000, night: 0xffffff)
-        
-        if cell.textLabel?.text == UserDefaultsManagement.storageExtension {
+
+        guard let text = cell.textLabel?.text else { return }
+
+        if NoteType.withExt(rawValue: text).tag == UserDefaultsManagement.fileFormat.tag {
             cell.accessoryType = .checkmark
         }
     }

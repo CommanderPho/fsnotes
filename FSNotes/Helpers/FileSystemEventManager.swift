@@ -35,9 +35,20 @@ class FileSystemEventManager {
             guard let url = URL(string: "file://" + path) else {
                 return
             }
+
+            if !event.path.contains(".textbundle") && (
+                event.dirRemoved || event.dirCreated || event.dirRenamed
+            ) {
+                self.handleDirEvents(event: event)
+                return
+            }
+
+            if !self.storage.allowedExtensions.contains(url.pathExtension) && !self.storage.isValidUTI(url: url) {
+                return
+            }
             
             if event.fileRemoved || event.dirRemoved {
-                guard let note = self.storage.getBy(url: url), let project = note.project, project.isTrash else { return }
+                guard let note = self.storage.getBy(url: url) else { return }
                 
                 self.removeNote(note: note)
             }
@@ -66,6 +77,49 @@ class FileSystemEventManager {
         
         watcher?.start()
     }
+
+    private func handleDirEvents(event: FileWatcherEvent) {
+        guard !event.path.contains("Trash") else { return }
+
+        let dirURL = URL(fileURLWithPath: event.path, isDirectory: true)
+        let project = self.storage.getProjectBy(url: dirURL)
+
+        let srcProject = self.storage.getProjects().first(where: { $0.moveSrc == dirURL })
+        let dstProject = self.storage.getProjects().first(where: { $0.moveDst == dirURL })
+
+        if event.dirRenamed {
+            if let project = project {
+                if dstProject != nil {
+                    dstProject?.moveDst = nil
+                } else {
+
+                    // hack: occasionally get rename event when created
+                    if !FileManager.default.fileExists(atPath: dirURL.path) {
+                        self.delegate.sidebarOutlineView.removeProject(project: project)
+                    }
+                }
+            } else {
+                if srcProject != nil {
+                    srcProject?.moveSrc = nil
+                } else {
+                    self.delegate.sidebarOutlineView.insertProject(url: dirURL)
+                }
+            }
+            return
+        }
+
+        if event.dirRemoved  {
+            if let project = project {
+                self.delegate.sidebarOutlineView.removeProject(project: project)
+            }
+            return
+        }
+
+        if event.dirCreated {
+            self.delegate.sidebarOutlineView.insertProject(url: dirURL)
+            return
+        }
+    }
     
     private func moveHandler(url: URL, pathList: [String]) {
         let fileExistInFS = self.checkFile(url: url, pathList: pathList)
@@ -88,62 +142,60 @@ class FileSystemEventManager {
     private func checkFile(url: URL, pathList: [String]) -> Bool {
         return (
             FileManager.default.fileExists(atPath: url.path)
-            && self.storage.allowedExtensions.contains(url.pathExtension)
+            && (
+                self.storage.allowedExtensions.contains(url.pathExtension)
+                || self.storage.isValidUTI(url: url)
+            )
             && pathList.contains(url.deletingLastPathComponent().path)
         )
     }
     
     private func importNote(_ url: URL) {
+        let url = self.handleTextBundle(url: url)
+
         let n = storage.getBy(url: url)
         guard n == nil else {
-            if let nUnwrapped = n, nUnwrapped.url == UserDataService.instance.lastRenamed {
+            if let nUnwrapped = n, nUnwrapped.url == UserDataService.instance.focusOnImport {
                 self.delegate.updateTable() {
                     self.delegate.notesTableView.setSelected(note: nUnwrapped)
-                    UserDataService.instance.lastRenamed = nil
+                    UserDataService.instance.focusOnImport = nil
                 }
             }
             return
         }
         
-        guard storage.getProjectBy(url: url) != nil else {
+        guard storage.getProjectByNote(url: url) != nil else {
             return
         }
         
-        let note = Note(url: url)
-        note.load(url)
+        guard let note = storage.initNote(url: url) else { return }
+        note.load()
         note.loadModifiedLocalAt()
-        note.markdownCache()
         
         print("FSWatcher import note: \"\(note.name)\"")
         self.storage.add(note)
         
         DispatchQueue.main.async {
-            if let url = UserDataService.instance.lastRenamed,
-                let note = self.storage.getBy(url: url) {
+            if let url = UserDataService.instance.focusOnImport,
+               let note = self.storage.getBy(url: url)
+            {
                 self.delegate.updateTable() {
                     self.delegate.notesTableView.setSelected(note: note)
-                    UserDataService.instance.lastRenamed = nil
+                    UserDataService.instance.focusOnImport = nil
                 }
             } else {
-                self.delegate.reloadView(note: note)
+                if !note.isTrash() {
+                    self.delegate.notesTableView.insertNew(note: note)
+                }
             }
         }
-        
-        if note.name == "FSNotes - Readme.md" {
-            self.delegate.updateTable() {
-                self.delegate.notesTableView.selectRow(0)
-                note.addPin()
-            }
-        }
-        
-        self.delegate.reloadSideBar()
     }
     
     private func renameNote(note: Note) {
-        if note.url == UserDataService.instance.lastRenamed {
+        if note.url == UserDataService.instance.focusOnImport {
             self.delegate.updateTable() {
                 self.delegate.notesTableView.setSelected(note: note)
-                UserDataService.instance.lastRenamed = nil
+                UserDataService.instance.focusOnImport = nil
             }
             
         // On TextBundle import
@@ -165,22 +217,50 @@ class FileSystemEventManager {
     }
     
     private func reloadNote(note: Note) {
+        guard note.container != .encryptedTextPack else { return }
         guard let fsContent = note.getContent() else { return }
+        
         let memoryContent = note.content.attributedSubstring(from: NSRange(0..<note.content.length))
         
-        if (note.isRTF() && fsContent != memoryContent)
-            || (!note.isRTF() && fsContent.string != memoryContent.string) {
+        if (
+            note.isRTF() && fsContent != memoryContent)
+            || (
+                !note.isRTF() && fsContent.string != memoryContent.string
+            )
+        {
             note.content = NSMutableAttributedString(attributedString: fsContent)
-            note.markdownCache()
-            
-            self.delegate.refillEditArea()
+
+            // tags changes
+
+            let result = note.scanContentTags()
+            if result.0.count > 0 {
+                DispatchQueue.main.async {
+                    self.delegate.sidebarOutlineView.insertTags(note: note)
+                }
+            }
+
+            if result.1.count > 0 {
+                DispatchQueue.main.async {
+                    self.delegate.sidebarOutlineView.removeTags(result.1)
+                }
+            }
+
+            // reload view
+
+            self.delegate.notesTableView.reloadRow(note: note)
+
+            if EditTextView.note == note {
+                DispatchQueue.main.async {
+                    self.delegate.refillEditArea(force: true)
+                }
+            }
         }
     }
     
     private func handleTextBundle(url: URL) -> URL {
-        if url.lastPathComponent == "text.markdown" && url.path.contains(".textbundle") {
+        if ["text.markdown", "text.md", "text.txt", "text.rtf"].contains(url.lastPathComponent) && url.path.contains(".textbundle") {
             let path = url.deletingLastPathComponent().path
-            return URL(fileURLWithPath: path)
+            return URL(fileURLWithPath: path, isDirectory: false)
         }
         
         return url
@@ -190,5 +270,9 @@ class FileSystemEventManager {
         watcher?.stop()
         self.observedFolders = self.storage.getProjectPaths()
         start()
+    }
+
+    public func reloadObservedFolders() {
+        self.observedFolders = self.storage.getProjectPaths()
     }
 }

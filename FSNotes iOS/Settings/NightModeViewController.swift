@@ -7,40 +7,42 @@
 //
 
 import UIKit
-import Solar
 import NightNight
-import CoreLocation
 
-class NightModeViewController: UITableViewController, CLLocationManagerDelegate {
-    var sections = ["Type", "Brightness level"]
+class NightModeViewController: UITableViewController {
+    var sections = [
+        NSLocalizedString("Type", comment: ""),
+        NSLocalizedString("Brightness level", comment: "")
+    ]
     var rowsInSection = [3, 1, 1]
     
     var rows = [
-        ["Disabled", "Enabled", "Auto by location", "Auto by screen brightness"],
+        [
+            NSLocalizedString("Disabled", comment: ""),
+            NSLocalizedString("Enabled", comment: ""),
+            NSLocalizedString("System", comment: ""),
+            NSLocalizedString("Auto by screen brightness", comment: "")
+        ],
         [""]
     ]
     
     let nightModeButton = UISwitch()
     let nightModeAutoButton = UISwitch()
-    let locationManager = CLLocationManager()
     
     override func viewDidLoad() {
-        view.mixedBackgroundColor = MixedColor(normal: 0xffffff, night: 0x2e2c32)
-        navigationController?.navigationBar.mixedTitleTextAttributes = [NNForegroundColorAttributeName: MixedColor(normal: 0x000000, night: 0xfafafa)]
+        view.mixedBackgroundColor = MixedColor(normal: 0xffffff, night: 0x000000)
+        navigationController?.navigationBar.mixedTitleTextAttributes = [NNForegroundColorAttributeName: Colors.titleText]
         navigationController?.navigationBar.mixedTintColor = MixedColor(normal: 0x4d8be6, night: 0x7eeba1)
         navigationController?.navigationBar.mixedBarTintColor = Colors.Header
 
-        self.navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Back", style: UIBarButtonItemStyle.plain, target: self, action: #selector(cancel))
-        self.title = "Night Mode"
+        self.navigationItem.leftBarButtonItem = Buttons.getBack(target: self, selector: #selector(cancel))
+        self.title = NSLocalizedString("Night Mode", comment: "Settings")
         
-        initNightMode()
         super.viewDidLoad()
-        
-        locationManager.delegate = self
     }
     
     @objc func cancel() {
-        self.dismiss(animated: true, completion: nil)
+        self.navigationController?.popViewController(animated: true)
     }
     
     override func tableView(_ tableView: UITableView, viewForFooterInSection section: Int) -> UIView? {
@@ -103,88 +105,41 @@ class NightModeViewController: UITableViewController, CLLocationManagerDelegate 
                 }
             }
             
-            if nightMode == .location {
-                UserDefaultsManagement.nightModeAuto = true
-                locationManager.requestWhenInUseAuthorization()
-            } else {
-                UserDefaultsManagement.nightModeAuto = false
+            if nightMode == .system {
+                if #available(iOS 12.0, *) {
+                    NightNight.theme = traitCollection.userInterfaceStyle == .dark ? .night : .normal
+                }
             }
             
             if nightMode == .disabled {
-                UIApplication.shared.statusBarStyle = .default
                 NightNight.theme = .normal
             }
             
             if nightMode == .enabled {
-                UIApplication.shared.statusBarStyle = .lightContent
                 NightNight.theme = .night
             }
             
             if nightMode == .brightness {
-                NotificationCenter.default.post(name: NSNotification.Name.UIScreenBrightnessDidChange, object: nil)
+                NotificationCenter.default.post(name: UIScreen.brightnessDidChangeNotification, object: nil)
             }
             
             tableView.reloadData()
             
-            guard let pageController = UIApplication.shared.windows[0].rootViewController as? PageViewController, let vc = pageController.orderedViewControllers[0] as? ViewController  else {
-                return
-            }
+            guard let pc = UIApplication.shared.windows[0].rootViewController as? BasicViewController,
+                let vc = pc.containerController.viewControllers[0] as? ViewController else { return }
             
-            vc.sidebarTableView.sidebar = Sidebar()
-            vc.sidebarTableView.reloadData()
-            vc.notesTable.reloadData()
+            vc.notesTable.layoutSubviews()
+            vc.sidebarTableView.layoutSubviews()
         }
     }
     
     override func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
-        cell.mixedBackgroundColor = MixedColor(normal: 0xffffff, night: 0x2e2c32)
+        cell.mixedBackgroundColor = MixedColor(normal: 0xffffff, night: 0x000000)
         cell.textLabel?.mixedTextColor = MixedColor(normal: 0x000000, night: 0xffffff)
     }
-    
-    @objc func nightModeDidChange(sender: UISwitch) {
-        if sender.isOn {
-            UIApplication.shared.statusBarStyle = .lightContent
-            NightNight.theme = .night
-        } else {
-            UIApplication.shared.statusBarStyle = .default
-            NightNight.theme = .normal
-        }
-    }
-    
-    func initNightMode() {
-        if UserDefaultsManagement.nightModeAuto {
-            var nightModeAuto = false
-            
-            switch CLLocationManager.authorizationStatus() {
-            case .notDetermined:
-                locationManager.requestWhenInUseAuthorization()
-                break
-            case .denied:
-                break
-            case .restricted:
-                break
-            case .authorizedWhenInUse:
-                nightModeAuto = true
-                break
-            case .authorizedAlways:
-                nightModeAuto = true
-            }
-            
-            nightModeAutoButton.setOn(nightModeAuto, animated: true)
-            UserDefaultsManagement.nightModeAuto = nightModeAuto
-        } else {
-            nightModeAutoButton.setOn(false, animated: true)
-        }
-    }
-    
-    func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
-        if UserDefaultsManagement.nightModeAuto {
-            nightModeAutoButton.isOn = (status == .authorizedWhenInUse)
-        }
-    }
-    
+
     @objc func didChangeBrightnessSlider(sender: UISlider) {
         UserDefaultsManagement.maxNightModeBrightnessLevel = sender.value
-        NotificationCenter.default.post(name: NSNotification.Name.UIScreenBrightnessDidChange, object: nil)
+        NotificationCenter.default.post(name: UIScreen.brightnessDidChangeNotification, object: nil)
     }
 }

@@ -11,15 +11,54 @@ import Foundation
 public enum NoteType: String {
     case Markdown = "md"
     case RichText = "rtf"
-    case PlainText = "txt"
-    case TextBundle = "textbundle"
-    
+
     static func withExt(rawValue: String) -> NoteType {
         switch rawValue {
-            case "markdown", "md", "mkd": return NoteType.Markdown
+            case "markdown", "md", "mkd", "txt": return NoteType.Markdown
             case "rtf": return NoteType.RichText
-            case "textbundle": return NoteType.TextBundle
-            default: return NoteType.PlainText
+            default: return NoteType.Markdown
         }
+    }
+    
+    static func withTag(rawValue: Int) -> NoteType {
+        switch rawValue {
+        case 1: return .Markdown
+        case 2: return .RichText
+        default: return .Markdown
+        }
+    }
+    
+    static func withUTI(rawValue: String) -> NoteType {
+        switch rawValue {
+        case "net.daringfireball.markdown": return .Markdown
+        case "public.rtf": return .RichText
+        default: return .Markdown
+        }
+    }
+        
+    public var tag: Int {
+        get {
+            switch self {
+            case .Markdown: return 1
+            case .RichText: return 2
+            }
+        }
+    }
+    
+    public var uti: String {
+        get {
+            switch self {
+            case .Markdown: return "net.daringfireball.markdown"
+            case .RichText: return "public.rtf"
+            }
+        }
+    }
+    
+    public func getExtension(for container: NoteContainer) -> String {
+        if self == .RichText {
+            return "rtf"
+        }
+
+        return UserDefaultsManagement.noteExtension
     }
 }

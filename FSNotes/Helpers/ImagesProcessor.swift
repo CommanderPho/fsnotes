@@ -17,25 +17,27 @@ public class ImagesProcessor {
 #if os(OSX)
     typealias Size = NSSize
     typealias Image = NSImage
+    typealias TView = EditTextView
 #else
     typealias Size = CGSize
     typealias Image = UIImage
+    typealias TView = UITextView
 #endif
-    
-    var textStorageNSString: NSString
+
     var styleApplier: NSMutableAttributedString
     var range: NSRange?
     var note: Note
     var paragraphRange: NSRange
+    var textView: TView?
     
     var offset = 0
     var newLineOffset = 0
     
-    init(styleApplier: NSMutableAttributedString, range: NSRange? = nil, note: Note) {
+    init(styleApplier: NSMutableAttributedString, range: NSRange? = nil, note: Note, textView: TView? = nil) {
         self.styleApplier = styleApplier
         self.range = range
         self.note = note
-        self.textStorageNSString = styleApplier.string as NSString
+        self.textView = textView
         
         if let unwrappedRange = range {
             paragraphRange = unwrappedRange
@@ -46,7 +48,8 @@ public class ImagesProcessor {
     
     public func load() {
         var offset = 0
-        
+
+        #if NOT_EXTENSION || os(OSX)
         NotesTextProcessor.imageInlineRegex.matches(self.styleApplier.string, range: paragraphRange) { (result) -> Void in
             guard var range = result?.range else { return }
             
@@ -56,7 +59,7 @@ public class ImagesProcessor {
             
             if var font = UserDefaultsManagement.noteFont {
                 #if os(iOS)
-                if #available(iOS 11.0, *) {
+                if #available(iOS 11.0, *), UserDefaultsManagement.dynamicTypeFont {
                     let fontMetrics = UIFontMetrics(forTextStyle: .body)
                     font = fontMetrics.scaledFont(for: font)
                 }
@@ -67,18 +70,26 @@ public class ImagesProcessor {
             
             if !UserDefaultsManagement.liveImagesPreview {
                 NotesTextProcessor.imageOpeningSquareRegex.matches(self.styleApplier.string, range: range) { (innerResult) -> Void in
-                    guard let innerRange = innerResult?.range else { return }
+                    guard let innerRange = innerResult?.range else {
+                        return
+                    }
+
                     self.styleApplier.addAttribute(.foregroundColor, value: NotesTextProcessor.syntaxColor, range: innerRange)
                 }
                 
                 NotesTextProcessor.imageClosingSquareRegex.matches(self.styleApplier.string, range: range) { (innerResult) -> Void in
-                    guard let innerRange = innerResult?.range else { return }
+                    guard let innerRange = innerResult?.range else {
+                        return
+                    }
                     self.styleApplier.addAttribute(.foregroundColor, value: NotesTextProcessor.syntaxColor, range: innerRange)
                 }
             }
             
             NotesTextProcessor.parenRegex.matches(self.styleApplier.string, range: range) { (innerResult) -> Void in
-                guard let innerRange = innerResult?.range else { return }
+                guard let innerRange = innerResult?.range else {
+                    return
+                }
+
                 var url: URL?
                 
                 let filePath = self.getFilePath(innerRange: innerRange)
@@ -92,8 +103,13 @@ public class ImagesProcessor {
                 guard let imageUrl = url else { return }
 
                 let invalidateRange = NSRange(location: range.location, length: 1)
-                let cacheUrl = self.note.project?.url.appendingPathComponent("/.cache/")
-                let imageAttachment = ImageAttachment(title: title, path: filePath, url: imageUrl, cache: cacheUrl, invalidateRange: invalidateRange)
+                let cacheUrl = self.note.project.url.appendingPathComponent("/.cache/")
+
+                if EditTextView.note?.url.absoluteString != self.note.url.absoluteString {
+                    return
+                }
+
+                let imageAttachment = NoteAttachment(title: title, path: filePath, url: imageUrl, cache: cacheUrl, invalidateRange: invalidateRange, note: self.note)
 
                 if let attributedStringWithImage = imageAttachment.getAttributedString() {
                     offset += mdLink.count - 1
@@ -101,30 +117,7 @@ public class ImagesProcessor {
                 }
             }
         }
-    }
-    
-    public func unLoad() {
-        note.content = NSMutableAttributedString(attributedString: styleApplier.attributedSubstring(from: NSRange(0..<styleApplier.length)))
-        
-        var offset = 0
-        
-        self.styleApplier.enumerateAttribute(.attachment, in: NSRange(location: 0, length: self.styleApplier.length)) { (value, range, stop) in
-            
-            if value != nil {
-                let newRange = NSRange(location: range.location + offset, length: range.length)
-                let filePathKey = NSAttributedStringKey(rawValue: "co.fluder.fsnotes.image.path")
-                let titleKey = NSAttributedStringKey(rawValue: "co.fluder.fsnotes.image.title")
-                
-                guard
-                    let path = self.styleApplier.attribute(filePathKey, at: range.location, effectiveRange: nil) as? String,
-                    let title = self.styleApplier.attribute(titleKey, at: range.location, effectiveRange: nil) as? String else { return }
-                
-                if let pathEncoded = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
-                    self.note.content.replaceCharacters(in: newRange, with: "![\(title)](\(pathEncoded))")
-                    offset += 4 + path.count + title.count
-                }
-            }
-        }
+        #endif
     }
     
     func computeMarkdownTitleLength(mdLink: String) -> Int {
@@ -146,16 +139,13 @@ public class ImagesProcessor {
     }
     
     func getLocalNotePath(path: String, innerRange: NSRange) -> String? {
-        guard let noteStorage = self.note.project else { return nil }
-        
+        let noteStorage = self.note.project
         var notePath: String
         let storagePath = noteStorage.url.path
         
-        if path.starts(with: "/i/") {
+        if path.starts(with: "/i/") || path.starts(with: "/files/") {
             let path = getFilePath(innerRange: innerRange)
-            if let project = note.project {
-                return project.url.path + path
-            }
+            return note.project.url.path + path
         }
         
         if path.starts(with: "http://") || path.starts(with: "https://"), let encodedPath = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
@@ -163,9 +153,9 @@ public class ImagesProcessor {
             return notePath
         }
         
-        if note.type == .TextBundle {
+        if note.isTextBundle() {
             if let name = path.removingPercentEncoding {
-                return "\(note.url.path)/\(name)"
+                return "\(note.getURL().path)/\(name)"
             }
         }
 
@@ -184,7 +174,7 @@ public class ImagesProcessor {
         return ""
     }
     
-    public static func getFileName(from: URL? = nil, to: URL) -> String? {
+    public static func getFileName(from: URL? = nil, to: URL, ext: String? = nil) -> String? {
         let path = from?.absoluteString ?? to.absoluteString
         var name: String?
 
@@ -193,9 +183,8 @@ public class ImagesProcessor {
         }
         
         if path.starts(with: "file://") {
-            var i = 0
-            var pathComponent = "1.jpg"
-            var ext = "jpg"
+            var ext = ext ?? "jpg"
+            var pathComponent = NSUUID().uuidString.lowercased() + "." + ext
 
             if let from = from {
                 pathComponent = from.lastPathComponent
@@ -204,9 +193,10 @@ public class ImagesProcessor {
 
             while name == nil {
                 let destination = to.appendingPathComponent(pathComponent)
-                if FileManager.default.fileExists(atPath: destination.path) {
-                    i = i + 1
-                    pathComponent = "\(i).\(ext)"
+                let icloud = destination.appendingPathExtension("icloud")
+                
+                if FileManager.default.fileExists(atPath: destination.path) || FileManager.default.fileExists(atPath: icloud.path) {
+                    pathComponent = NSUUID().uuidString.lowercased() + ".\(ext)"
                     continue
                 }
                 
@@ -217,44 +207,50 @@ public class ImagesProcessor {
         return name
     }
     
-    public static func writeImage(data: Data, url: URL? = nil, note: Note) -> String? {
-        if note.type == .TextBundle {
-            let assetsUrl = note.url.appendingPathComponent("assets")
+    public static func writeFile(data: Data, url: URL? = nil, note: Note, ext: String? = nil) -> String? {
+        if note.isTextBundle() {
+            let assetsUrl = note.getURL().appendingPathComponent("assets")
             
             if !FileManager.default.fileExists(atPath: assetsUrl.path, isDirectory: nil) {
-                try? FileManager.default.createDirectory(at: assetsUrl, withIntermediateDirectories: false, attributes: nil)
+                try? FileManager.default.createDirectory(at: assetsUrl, withIntermediateDirectories: true, attributes: nil)
             }
-            
-            let destination = URL(fileURLWithPath: assetsUrl.path)
-            guard let fileName = ImagesProcessor.getFileName(from: url, to: destination) else {
-                return nil
-            }
-            
-            let to = destination.appendingPathComponent(fileName)
-            try? data.write(to: to, options: .atomic)
-            
-            return fileName
-        }
-        
-        if let project = note.project {
-            let destination = URL(fileURLWithPath: project.url.path + "/i/")
 
-            do {
-                try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: false, attributes: nil)
-            } catch {
-            }
-            
-            guard let fileName = ImagesProcessor.getFileName(from: url, to: destination) else {
-                return nil
-            }
+            let destination = URL(fileURLWithPath: assetsUrl.path)
+            guard var fileName = ImagesProcessor.getFileName(from: url, to: destination, ext: ext) else { return nil }
             
             let to = destination.appendingPathComponent(fileName)
-            try? data.write(to: to, options: .atomic)
-            
-            return fileName
+            do {
+                try data.write(to: to, options: .atomic)
+            } catch {
+                print(error)
+            }
+
+            fileName = fileName
+                .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? fileName
+
+            return "assets/\(fileName)"
         }
-        
-        return nil
+
+        var prefix = "/i/"
+        if let url = url, !url.isImage {
+            prefix = "/files/"
+        }
+
+        let project = note.project
+        let destination = URL(fileURLWithPath: project.url.path + prefix)
+
+        do {
+            try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: false, attributes: nil)
+        } catch {}
+
+        guard var fileName = ImagesProcessor.getFileName(from: url, to: destination, ext: ext) else { return nil }
+
+        let to = destination.appendingPathComponent(fileName)
+        try? data.write(to: to, options: .atomic)
+
+        fileName = fileName.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? fileName
+
+        return "\(prefix)\(fileName)"
     }
 
     func isContainAttachment(innerRange: NSRange, mdTitleLength: Int) -> Bool {
